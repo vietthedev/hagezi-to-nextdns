@@ -1,0 +1,1 @@
+# HaGeZi to NextDNS
