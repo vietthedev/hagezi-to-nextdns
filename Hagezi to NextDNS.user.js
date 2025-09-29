@@ -2,7 +2,7 @@
 // @name            HaGeZi to NextDNS
 // @namespace       vietthe.dev
 // @match           https://my.nextdns.io/*
-// @grant           none
+// @grant           GM_addStyle
 // @version         1.1.0
 // @license         MIT
 // @author          vietthedev
@@ -17,7 +17,6 @@
 // @compatible      edge Tampermonkey
 // @compatible      brave Violentmonkey
 // @compatible      brave Tampermonkey
-// @grant           GM_addStyle
 // @description     A userscript that allows you to fetch HaGeZi lists and add them to your NextDNS allowlist and denylist.
 // @description:en  A userscript that allows you to fetch HaGeZi lists and add them to your NextDNS allowlist and denylist.
 // @description:vi  Userscript giúp bạn nhập các danh sách HaGeZi vào danh sách cho phép và danh sách chặn của NextDNS.
