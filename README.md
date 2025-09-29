@@ -14,5 +14,7 @@ This userscript allows you to:
 
 ## Usage
 
+Usage is straightforward.
+
 <img width="400" height="764" alt="image" src="https://github.com/user-attachments/assets/492b9fe1-e1af-4bee-abab-081f844cecd6" />
 
