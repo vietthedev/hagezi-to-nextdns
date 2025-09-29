@@ -10,4 +10,4 @@ This userscript allows you to:
 ## Installation
 
 1. Install a userscript manager such as Violentmonkey or Tampermonkey
-2. Go to [https://greasyfork.org/en/scripts/547411-hagezi-to-nextdns] and click the **Install** button or click [this link](https://raw.githubusercontent.com/vietthedev/hagezi-to-nextdns/refs/heads/main/Hagezi%20to%20NextDNS.user.js) to install directly from here
+2. Go to <https://greasyfork.org/en/scripts/547411-hagezi-to-nextdns> and click the **Install** button or click [this link](https://raw.githubusercontent.com/vietthedev/hagezi-to-nextdns/refs/heads/main/Hagezi%20to%20NextDNS.user.js) to install directly from here
