@@ -186,7 +186,7 @@
 
 		getErrorTrackerList: () =>
 			Helper.getWildcardList(
-				"https://cdn.gisthostfor.me/vietthedev-0QarR9wCTw-bug-trackers-onlydomains.txt",
+				"https://cdn.jsdelivr.net/gh/vietthedev/hagezi-to-nextdns@latest/resources/error-trackers-onlydomains.txt",
 			),
 	};
 
