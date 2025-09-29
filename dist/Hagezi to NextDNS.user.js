@@ -3,7 +3,7 @@
 // @namespace       vietthe.dev
 // @match           https://my.nextdns.io/*
 // @grant           GM_addStyle
-// @version         1.1.0
+// @version         1.1.1
 // @license         MIT
 // @author          vietthedev
 // @compatible      firefox Violentmonkey
@@ -88,7 +88,7 @@
 			enterTheLink:
 				'Nhập đường dẫn tới danh sách tên miền ở định dạng có hoặc không có dấu "*":',
 		},
-	}[navigator.language === "vi" ? "vi" : "en"];
+	}[window.navigator.language === "vi" ? "vi" : "en"];
 	const ListType = {
 		Allowlist: "1",
 		Denylist: "2",
