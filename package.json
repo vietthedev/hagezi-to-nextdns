@@ -9,12 +9,12 @@
 		"type": "git",
 		"url": "git+https://github.com/vietthedev/hagezi-to-nextdns.git"
 	},
-	"author": "vietthedev <vietthedev@gmail.com>",
+	"author": "Việt Huỳnh <vietthedev@gmail.com>",
 	"license": "MIT",
 	"bugs": {
 		"url": "https://github.com/vietthedev/hagezi-to-nextdns/issues"
 	},
-	"homepage": "https://github.com/vietthedev/hagezi-to-nextdns#readme",
+	"homepage": "https://github.com/vietthedev/hagezi-to-nextdns",
 	"devDependencies": {
 		"@biomejs/biome": "2.2.4",
 		"lefthook": "1.13.5"
