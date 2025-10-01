@@ -3,7 +3,7 @@
 // @namespace       vietthe.dev
 // @match           https://my.nextdns.io/*
 // @grant           GM_addStyle
-// @version         1.1.1
+// @version         1.1.2
 // @license         MIT
 // @author          vietthedev
 // @compatible      firefox Violentmonkey
