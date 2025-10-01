@@ -1019,7 +1019,7 @@
 		isInit = true;
 	};
 
-	window.navigation.addEventListener("navigatesuccess", init);
+	window.navigation?.addEventListener("navigatesuccess", init);
 	init();
 
 	GM_addStyle(`
