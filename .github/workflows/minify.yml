@@ -1,0 +1,33 @@
+name: Minify Userscript
+on:
+  workflow_dispatch:
+jobs:
+  Minify:
+    name: Minify Userscript
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: '.node-version'
+      - name: Convert
+        run: |
+            echo "Installing Terser..."
+            npm install terser -g
+            echo "Minification Userscript..."
+            sed -n '/\/\/ ==UserScript==/,/\/\/ ==\/UserScript==/p' "dist/Hagezi to NextDNS.user.js" > "Hagezi to NextDNS.meta.js"
+            sed -n '/\/\/ ==\/UserScript==/,$p' "dist/Hagezi to NextDNS.user.js" | tail -n +2 > "Hagezi to NextDNS.js"
+            terser --compress --comments false --parse bare_returns --output "Hagezi to NextDNS Minify.js" -- "Hagezi to NextDNS.js"
+            [ $(wc -c < "Hagezi to NextDNS Minify.js") -lt 100 ] && { echo "Failed to minify userscript"; exit 1; }
+            cat "Hagezi to NextDNS.meta.js" "Hagezi to NextDNS Minify.js" > "dist/Hagezi to NextDNS Minify.user.js"
+            echo "Completed Minification Userscript!"
+      - name: Commit
+        uses: stefanzweifel/git-auto-commit-action@v6.0.1
+        with:
+          branch: main
+          file_pattern: 'dist/*Minify.user.js'
+          commit_message: Minify Release
