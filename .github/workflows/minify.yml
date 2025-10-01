@@ -1,9 +1,14 @@
 name: Minify Userscript
+
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+
 jobs:
   Minify:
-    name: Minify Userscript
+    name: Minify userscript
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -13,21 +18,19 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version-file: '.node-version'
-      - name: Convert
+          node-version-file: ".node-version"
+      - name: Minify
         run: |
-            echo "Installing Terser..."
-            npm install terser -g
-            echo "Minification Userscript..."
-            sed -n '/\/\/ ==UserScript==/,/\/\/ ==\/UserScript==/p' "dist/Hagezi to NextDNS.user.js" > "Hagezi to NextDNS.meta.js"
-            sed -n '/\/\/ ==\/UserScript==/,$p' "dist/Hagezi to NextDNS.user.js" | tail -n +2 > "Hagezi to NextDNS.js"
-            terser --compress --comments false --parse bare_returns --output "Hagezi to NextDNS Minify.js" -- "Hagezi to NextDNS.js"
-            [ $(wc -c < "Hagezi to NextDNS Minify.js") -lt 100 ] && { echo "Failed to minify userscript"; exit 1; }
-            cat "Hagezi to NextDNS.meta.js" "Hagezi to NextDNS Minify.js" > "dist/Hagezi to NextDNS Minify.user.js"
-            echo "Completed Minification Userscript!"
+          echo "Minifying userscript..."
+          sed -n '/\/\/ ==UserScript==/,/\/\/ ==\/UserScript==/p' "dist/Hagezi to NextDNS.user.js" > "meta.js"
+          sed -n '/\/\/ ==\/UserScript==/,$p' "dist/Hagezi to NextDNS.user.js" | tail -n +2 > "input.js"
+          npx terser --compress --mangle --comments false --parse bare_returns --output "output.js" -- "input.js"
+          [ $(wc -c < "output.js") -lt 100 ] && { echo "Failed to minify userscript"; exit 1; }
+          cat "meta.js" "output.js" > "dist/Hagezi to NextDNS.min.user.js"
+          echo "Userscript minification completed!"
       - name: Commit
         uses: stefanzweifel/git-auto-commit-action@778341af668090896ca464160c2def5d1d1a3eb0 # v6.0.1
         with:
           branch: main
-          file_pattern: 'dist/*Minify.user.js'
-          commit_message: Minify Release
+          file_pattern: "dist/*.min.user.js"
+          commit_message: minify userscript
