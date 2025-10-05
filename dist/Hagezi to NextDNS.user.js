@@ -513,17 +513,11 @@
 	} = createUserInterface();
 
 	const addToggleButton = () => {
-		const observer = new MutationObserver((records, observer) => {
-			for (const record of records) {
-				const nav = document.querySelector(".nav");
+		const observer = new MutationObserver(() => {
+			const nav = document.querySelector(".nav");
 
-				if (nav && !nav.querySelector(".toggle-button")) {
-					nav.appendChild(toggleButtonContainer);
-				}
-
-				if (record.target.childNodes.length === 0) {
-					observer.disconnect();
-				}
+			if (!nav?.querySelector(".toggle-button")) {
+				nav.appendChild(toggleButtonContainer);
 			}
 		});
 
