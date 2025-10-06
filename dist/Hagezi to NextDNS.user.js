@@ -1009,7 +1009,7 @@
 		statList.innerHTML = "";
 		cardBody.prepend(loader);
 		await refreshStats();
-		cardBody.removeChild(loader);
+		loader.remove();
 		isInit = true;
 	};
 
