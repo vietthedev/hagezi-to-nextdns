@@ -516,9 +516,9 @@
 		const observer = new MutationObserver(() => {
 			const nav = document.querySelector(".nav");
 
-			if (!nav?.querySelector(".toggle-button")) {
-				nav.appendChild(toggleButtonContainer);
-			}
+			if (!nav || nav.querySelector(".toggle-button")) return;
+
+			nav.appendChild(toggleButtonContainer);
 		});
 
 		observer.observe(document.body, {
