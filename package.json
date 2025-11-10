@@ -17,7 +17,7 @@
 	"homepage": "https://github.com/vietthedev/hagezi-to-nextdns",
 	"devDependencies": {
 		"@biomejs/biome": "2.3.4",
-		"lefthook": "2.0.2"
+		"lefthook": "2.0.3"
 	},
 	"engines": {
 		"node": "24.11.0"
