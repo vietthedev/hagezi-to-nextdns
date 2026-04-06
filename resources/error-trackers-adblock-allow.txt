@@ -1,3 +1,10 @@
+! Title: Error Tracker Allowlist
+! Description: This list allows common and app-specific error trackers.
+! Homepage: https://github.com/vietthedev/hagezi-to-nextdns
+! License: https://github.com/vietthedev/hagezi-to-nextdns/blob/main/LICENSE
+! Issues: https://github.com/vietthedev/hagezi-to-nextdns/issues
+! Syntax: AdBlock
+
 @||amp-error-reporting.appspot.com
 @||andrbugly.play.cp81.ott.cibntv.net
 @||android.bugly.prod01.amer.cros.wr.pvp.net
