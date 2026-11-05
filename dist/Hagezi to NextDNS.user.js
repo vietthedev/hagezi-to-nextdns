@@ -25,11 +25,11 @@
 // @supportURL      https://github.com/vietthedev/hagezi-to-nextdns/issues
 // ==/UserScript==
 
-/* jshint esversion:2020 */
+/* jshint esversion:2022 */
+/* global GM_addStyle, MutationObserver, location */
 
-(async (window) => {
-	const punycode = await import("https://esm.run/punycode");
-	const lang = {
+(async () => {
+	const translations = {
 		en: {
 			hidePanel: "Hide Panel",
 			showPanel: "Show Panel",
@@ -51,13 +51,18 @@
 			done: "Done!",
 			expand: "Expand",
 			collapse: "Collapse",
-			chooseAListToProceed:
-				"Choose a list to proceed:\n1. Allowlist\n2. Denylist",
+			chooseAListToProceed: "Choose a list to proceed:",
 			areYouSureYouWantToProceed: "Are you sure you want to proceed?",
 			allowlist: "Allowlist",
 			denylist: "Denylist",
 			enterTheLink:
 				"Enter the link to the list in wildcard asterisk or wildcard domain format:",
+			profileChanged: "The NextDNS profile changed; operation stopped.",
+			invalidResponse: "Unexpected response from NextDNS.",
+			emptyList: "The source did not contain any valid domains.",
+			retrying: "Retrying request",
+			verificationFailed:
+				"Write failed; could not verify the current NextDNS list.",
 		},
 		vi: {
 			hidePanel: "Ẩn Bảng",
@@ -80,1013 +85,635 @@
 			done: "Xong!",
 			expand: "Mở rộng",
 			collapse: "Thu gọn",
-			chooseAListToProceed:
-				"Chọn danh sách để tiến hành:\n1. Danh sách cho phép\n2. Danh sách chặn",
+			chooseAListToProceed: "Chọn danh sách để tiến hành:",
 			areYouSureYouWantToProceed: "Bạn có chắc muốn tiến hành?",
 			allowlist: "Danh sách cho phép",
 			denylist: "Danh sách chặn",
 			enterTheLink:
 				'Nhập đường dẫn tới danh sách tên miền ở định dạng có hoặc không có dấu "*":',
-		},
-	}[window.navigator.language === "vi" ? "vi" : "en"];
-	const ListType = {
-		Allowlist: "1",
-		Denylist: "2",
-	};
-
-	const Utility = {
-		sleep: (ms = 500) =>
-			new Promise((resolve) => setTimeout(() => resolve(), ms)),
-		toHex: (text) => {
-			let hex = "";
-
-			for (let i = 0; i < text.length; i++) {
-				const charCode = text.charCodeAt(i);
-				const hexCode = charCode.toString(16).padStart(2, "0");
-
-				hex += hexCode;
-			}
-
-			return hex;
+			profileChanged: "Đã chuyển cấu hình NextDNS; thao tác đã dừng.",
+			invalidResponse: "Phản hồi từ NextDNS không hợp lệ.",
+			emptyList: "Danh sách nguồn không chứa tên miền hợp lệ.",
+			retrying: "Đang thử lại yêu cầu",
+			verificationFailed:
+				"Ghi dữ liệu thất bại; không thể kiểm tra danh sách NextDNS hiện tại.",
 		},
 	};
 
-	const Helper = {
-		getProfileId: () => location.pathname.split("/")[1],
-
-		profileIdExists: () => location.pathname.split("/").length >= 3,
-
-		confirmProceed: () => window.confirm(lang.areYouSureYouWantToProceed),
-
-		promptListType: () => {
-			let answer;
-
-			while (answer !== null && !Object.values(ListType).includes(answer)) {
-				answer = window.prompt(lang.chooseAListToProceed);
-			}
-
-			return answer;
-		},
-
-		promptUrl: () => {
-			const pattern =
-				/^(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/[a-zA-Z0-9]+\.[^\s]{2,}|[a-zA-Z0-9]+\.[^\s]{2,})$/;
-			let answer;
-
-			while (answer !== null && !pattern.test(answer)) {
-				answer = window.prompt(lang.enterTheLink);
-			}
-
-			return answer;
-		},
-
-		getAdblockList: async (url, isTldList = false) => {
-			const content = await fetch(url).then((res) => res.text());
-			const matches = content
-				.trim()
-				.matchAll(/^(\|\|)?(?<domain>(xn--)?[\w.-]+)(\^)?$/gm);
-			const domains = new Set();
-
-			for (const match of matches) {
-				if (isTldList && match.groups.domain.includes(".")) continue;
-				domains.add(match.groups.domain);
-			}
-
-			return domains;
-		},
-
-		getWildcardList: async (url, isTldList = false) => {
-			const content = await fetch(url).then((res) => res.text());
-			const matches = content.trim().matchAll(/^(\*\.)*(?<domain>[\w.-]+)$/gm);
-			const domains = new Set();
-
-			for (const match of matches) {
-				if (isTldList && match.groups.domain.includes(".")) continue;
-				domains.add(match.groups.domain);
-			}
-
-			return domains;
-		},
-
-		getAbusedTlds: () =>
-			Helper.getAdblockList(
-				"https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/spam-tlds-adblock.txt",
-				true,
-			),
-
-		getAbusedTldsAggressive: () =>
-			Helper.getWildcardList(
-				"https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/spam-tlds-onlydomains.txt",
-				true,
-			),
-
-		getTldAllowlist: () =>
-			Helper.getWildcardList(
-				"https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/spam-tlds-allow-onlydomains.txt",
-			),
-
-		getErrorTrackerList: () =>
-			Helper.getWildcardList(
-				"https://cdn.jsdelivr.net/gh/vietthedev/hagezi-to-nextdns@latest/resources/error-trackers-onlydomains.txt",
-			),
+	const LOCALE = Object.freeze({ VIETNAMESE: "vi", ENGLISH: "en" });
+	const lang =
+		translations[
+			navigator.language.toLowerCase().startsWith(LOCALE.VIETNAMESE)
+				? LOCALE.VIETNAMESE
+				: LOCALE.ENGLISH
+		];
+	const CONFIG = Object.freeze({
+		apiHost: "https://api.nextdns.io",
+		hageziCdn: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest",
+		scriptCdn:
+			"https://cdn.jsdelivr.net/gh/vietthedev/hagezi-to-nextdns@latest",
+		githubHost: "github.com",
+		githubRawHost: "raw.githubusercontent.com",
+		punycodeModule: "https://esm.run/punycode",
+		requestDelayMs: 500,
+		retry: Object.freeze({
+			attempts: 4,
+			baseDelayMs: 800,
+			maxDelayMs: 30_000,
+			jitterRatio: 0.2,
+		}),
+	});
+	const HTTP = Object.freeze({
+		REQUEST_TIMEOUT: 408,
+		TOO_MANY_REQUESTS: 429,
+		SERVER_ERROR_MIN: 500,
+		SERVER_ERROR_MAX: 599,
+		MILLISECONDS_PER_SECOND: 1000,
+		RETRY_AFTER: "Retry-After",
+		JSON_HEADERS: Object.freeze({ "Content-Type": "application/json" }),
+		FETCH_OPTIONS: Object.freeze({ mode: "cors", credentials: "include" }),
+		METHOD: Object.freeze({ POST: "POST", DELETE: "DELETE" }),
+	});
+	const LIST = Object.freeze({
+		TLDS: "tlds",
+		ALLOW: "allowlist",
+		DENY: "denylist",
+	});
+	const OPERATION = Object.freeze({ ADD: "add", REMOVE: "remove" });
+	const FORMAT = Object.freeze({ ADBLOCK: "adblock", WILDCARD: "wildcard" });
+	const LIST_CHOICES = Object.freeze({ [LIST.ALLOW]: "1", [LIST.DENY]: "2" });
+	const API_PATHS = Object.freeze({
+		[LIST.TLDS]: Object.freeze({ read: "security", write: "security/tlds" }),
+		[LIST.ALLOW]: Object.freeze({ read: LIST.ALLOW, write: LIST.ALLOW }),
+		[LIST.DENY]: Object.freeze({ read: LIST.DENY, write: LIST.DENY }),
+	});
+	const UI_TITLE = "HaGeZi to NextDNS";
+	const SOURCE_PROTOCOLS = new Set(["http:", "https:"]);
+	const PUNYCODE_PREFIX = "xn--";
+	const EXPORT_MIME_TYPE = "text/plain;charset=utf-8";
+	const API_HEX_PREFIX = "hex:";
+	const HEX_BYTE_WIDTH = 2;
+	const MIN_PROFILE_PATH_SEGMENTS = 2;
+	const ARROWS = {
+		down: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>',
+		up: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>',
 	};
+	const SOURCE_DEFINITIONS = {
+		tlds: {
+			url: `${CONFIG.hageziCdn}/adblock/spam-tlds-adblock.txt`,
+			format: FORMAT.ADBLOCK,
+			tldsOnly: true,
+		},
+		aggressiveTlds: {
+			url: `${CONFIG.hageziCdn}/wildcard/spam-tlds-onlydomains.txt`,
+			format: FORMAT.WILDCARD,
+			tldsOnly: true,
+		},
+		tldAllowlist: {
+			url: `${CONFIG.hageziCdn}/wildcard/spam-tlds-allow-onlydomains.txt`,
+			format: FORMAT.WILDCARD,
+		},
+		errorTrackers: {
+			url: `${CONFIG.scriptCdn}/resources/error-trackers-onlydomains.txt`,
+			format: FORMAT.WILDCARD,
+		},
+	};
+	const ACTIONS = [
+		{
+			source: "tlds",
+			list: LIST.TLDS,
+			addLabel: "importHageziTlds",
+			removeLabel: "removeHageziTlds",
+		},
+		{
+			source: "aggressiveTlds",
+			list: LIST.TLDS,
+			addLabel: "importHageziTldsAggressive",
+			removeLabel: "removeHageziTldsAggressive",
+		},
+		{
+			source: "tldAllowlist",
+			list: LIST.ALLOW,
+			addLabel: "importHageziTldAllowlist",
+			removeLabel: "removeHageziTldAllowlist",
+		},
+		{
+			source: "errorTrackers",
+			selectList: true,
+			addLabel: "importErrorTrackers",
+			removeLabel: "removeErrorTrackers",
+		},
+		{
+			customUrl: true,
+			selectList: true,
+			addLabel: "importCustomList",
+			removeLabel: "removeCustomList",
+		},
+	];
 
-	class NextApi {
-		apiHost = "https://api.nextdns.io";
+	let punycode;
+	try {
+		punycode = await import(CONFIG.punycodeModule);
+	} catch (error) {
+		console.warn(`${UI_TITLE}: Unicode TLD display unavailable`, error);
+	}
 
-		constructor(profileId) {
-			this.profileId = profileId;
-		}
+	const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	const encodeId = (value) =>
+		Array.from(new TextEncoder().encode(value), (byte) =>
+			byte.toString(16).padStart(HEX_BYTE_WIDTH, "0"),
+		).join("");
 
-		async request(path, options) {
-			const response = await fetch(`${this.apiHost}${path}`, {
-				headers: {
-					"Content-Type": "application/json",
-					...options?.headers,
-				},
-				mode: "cors",
-				credentials: "include",
-				...options,
-			});
-
-			if (!response.ok) {
-				throw new Error(response.statusText);
-			}
-
-			return response;
-		}
-
-		async getSecurity() {
-			const res = await this.request(`/profiles/${this.profileId}/security`);
-
-			return await res.json();
-		}
-
-		async getDenylist() {
-			const res = await this.request(`/profiles/${this.profileId}/denylist`);
-
-			return await res.json();
-		}
-
-		async getAllowlist() {
-			const res = await this.request(`/profiles/${this.profileId}/allowlist`);
-
-			return await res.json();
-		}
-
-		addTld(tld) {
-			return this.request(`/profiles/${this.profileId}/security/tlds`, {
-				method: "POST",
-				body: JSON.stringify({ id: tld }),
-			});
-		}
-
-		removeTld(tld) {
-			return this.request(
-				`/profiles/${this.profileId}/security/tlds/hex:${Utility.toHex(tld)}`,
-				{
-					method: "DELETE",
-				},
+	class HttpError extends Error {
+		constructor(response) {
+			super(
+				`HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`,
 			);
-		}
-
-		denylistDomain(domain) {
-			return this.request(`/profiles/${this.profileId}/denylist`, {
-				method: "POST",
-				body: JSON.stringify({ active: true, id: domain }),
-			});
-		}
-
-		allowlistDomain(domain) {
-			return this.request(`/profiles/${this.profileId}/allowlist`, {
-				method: "POST",
-				body: JSON.stringify({ active: true, id: domain }),
-			});
-		}
-
-		removeDeniedDomain(domain) {
-			return this.request(
-				`/profiles/${this.profileId}/denylist/hex:${Utility.toHex(domain)}`,
-				{
-					method: "DELETE",
-				},
-			);
-		}
-
-		removeAllowedDomain(domain) {
-			return this.request(
-				`/profiles/${this.profileId}/allowlist/hex:${Utility.toHex(domain)}`,
-				{
-					method: "DELETE",
-				},
-			);
+			this.status = response.status;
+			const header = response.headers?.get(HTTP.RETRY_AFTER);
+			const seconds = Number(header);
+			this.retryAfterMs =
+				header == null
+					? 0
+					: Number.isFinite(seconds)
+						? Math.max(0, seconds * HTTP.MILLISECONDS_PER_SECOND)
+						: Math.max(0, Date.parse(header) - Date.now()) || 0;
 		}
 	}
 
-	const arrowDownHtml = `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#1f1f1f"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>`;
-	const arrowUpHtml = `<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#1f1f1f"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>`;
+	function isTransient(error) {
+		return (
+			error instanceof TypeError ||
+			(error instanceof HttpError &&
+				(error.status === HTTP.REQUEST_TIMEOUT ||
+					error.status === HTTP.TOO_MANY_REQUESTS ||
+					(error.status >= HTTP.SERVER_ERROR_MIN &&
+						error.status <= HTTP.SERVER_ERROR_MAX)))
+		);
+	}
 
-	const hidePanel = () => {
-		const panelContainer = document.querySelector(".panel-container");
-		const toggleButton = document.querySelector(".toggle-button");
+	function retryDelay(error, attempt) {
+		const { baseDelayMs, maxDelayMs, jitterRatio } = CONFIG.retry;
+		const backoff =
+			baseDelayMs *
+			2 ** attempt *
+			(1 - jitterRatio + Math.random() * 2 * jitterRatio);
+		return Math.min(maxDelayMs, Math.max(backoff, error.retryAfterMs || 0));
+	}
 
-		requestAnimationFrame(function hide() {
-			const { opacity } = getComputedStyle(panelContainer);
+	async function fetchOnce(url, options) {
+		const response = await fetch(url, options);
+		if (!response.ok) throw new HttpError(response);
+		return response;
+	}
 
-			if (opacity === "0") {
-				panelContainer.classList.add("hidden");
-
-				if (toggleButton) {
-					toggleButton.textContent = lang.showPanel;
-				}
-
-				return;
+	async function fetchWithRetry(url, options, onRetry) {
+		for (let attempt = 0; attempt < CONFIG.retry.attempts; attempt++) {
+			try {
+				return await fetchOnce(url, options);
+			} catch (error) {
+				if (!isTransient(error) || attempt === CONFIG.retry.attempts - 1)
+					throw error;
+				const wait = retryDelay(error, attempt);
+				onRetry?.(attempt + 2, CONFIG.retry.attempts, wait);
+				await delay(wait);
 			}
+		}
+	}
 
-			panelContainer.style.opacity = Number.parseFloat(opacity) - 0.1;
-			requestAnimationFrame(hide);
-		});
-	};
+	function getProfileId() {
+		const parts = location.pathname.split("/").filter(Boolean);
+		return parts.length >= MIN_PROFILE_PATH_SEGMENTS &&
+			/^[\w-]+$/.test(parts[0])
+			? parts[0]
+			: null;
+	}
 
-	const showPanel = () => {
-		const panelContainer = document.querySelector(".panel-container");
-		const toggleButton = document.querySelector(".toggle-button");
+	function promptListType() {
+		let choice;
+		const message = `${lang.chooseAListToProceed}\n${LIST_CHOICES[LIST.ALLOW]}. ${lang.allowlist}\n${LIST_CHOICES[LIST.DENY]}. ${lang.denylist}`;
+		do {
+			choice = window.prompt(message);
+		} while (choice !== null && !Object.values(LIST_CHOICES).includes(choice));
+		return (
+			Object.keys(LIST_CHOICES).find((type) => LIST_CHOICES[type] === choice) ??
+			null
+		);
+	}
 
-		panelContainer.classList.remove("hidden");
-
-		requestAnimationFrame(function show() {
-			const { opacity } = getComputedStyle(panelContainer);
-
-			if (opacity === "1") {
-				if (toggleButton) {
-					toggleButton.textContent = lang.hidePanel;
+	function promptUrl() {
+		while (true) {
+			const answer = window.prompt(lang.enterTheLink);
+			if (answer === null) return null;
+			try {
+				const url = new URL(answer.trim());
+				if (SOURCE_PROTOCOLS.has(url.protocol) && url.hostname.includes(".")) {
+					return url.href;
 				}
-				return;
+			} catch {
+				// Ask again for a valid absolute HTTP(S) URL.
 			}
+		}
+	}
 
-			panelContainer.style.opacity = Number.parseFloat(opacity) + 0.1;
-			requestAnimationFrame(show);
+	function parseDomains(content, format, tldsOnly = false) {
+		const domains = new Set();
+		const pattern =
+			format === FORMAT.ADBLOCK
+				? /^(?:\|\|)?([\w.-]+)(?:\^)?$/
+				: /^(?:\*\.)*([\w.-]+)$/;
+
+		for (const line of content.split(/\r?\n/)) {
+			const match = pattern.exec(line.trim());
+			if (!match) continue;
+			const domain = match[1];
+			if (tldsOnly && domain.includes(".")) continue;
+			domains.add(domain);
+		}
+		return domains;
+	}
+
+	function normalizeSourceUrl(address) {
+		const url = new URL(address);
+		const segments = url.pathname.split("/");
+		if (
+			url.protocol !== "https:" ||
+			url.hostname !== CONFIG.githubHost ||
+			url.port ||
+			segments[3] !== "raw" ||
+			segments.length < 6
+		) {
+			return address;
+		}
+
+		// GitHub's /raw/ endpoint redirects to a different origin without CORS headers.
+		const raw = new URL(
+			`https://${CONFIG.githubRawHost}/${segments[1]}/${segments[2]}/${segments.slice(4).join("/")}`,
+		);
+		raw.search = url.search;
+		return raw.href;
+	}
+
+	async function fetchSource(source, onRetry) {
+		const response = await fetchWithRetry(
+			normalizeSourceUrl(source.url),
+			undefined,
+			onRetry,
+		);
+		return parseDomains(await response.text(), source.format, source.tldsOnly);
+	}
+
+	class NextDnsApi {
+		constructor(profileId, onRetry) {
+			this.baseUrl = `${CONFIG.apiHost}/profiles/${encodeURIComponent(profileId)}`;
+			this.onRetry = onRetry;
+		}
+
+		request(path, options = {}) {
+			return fetchWithRetry(
+				`${this.baseUrl}/${path}`,
+				{
+					...HTTP.FETCH_OPTIONS,
+					...options,
+					...(options.body ? { headers: HTTP.JSON_HEADERS } : {}),
+				},
+				this.onRetry,
+			);
+		}
+
+		async getIds(type) {
+			const response = await this.request(API_PATHS[type].read);
+			const payload = await response.json();
+			const entries = type === LIST.TLDS ? payload?.data?.tlds : payload?.data;
+			if (!Array.isArray(entries)) throw new Error(lang.invalidResponse);
+			return entries.map(({ id }) => id);
+		}
+
+		async change(type, operation, domain) {
+			const path = API_PATHS[type].write;
+			const url = `${this.baseUrl}/${operation === OPERATION.ADD ? path : `${path}/${API_HEX_PREFIX}${encodeId(domain)}`}`;
+			const options = {
+				...HTTP.FETCH_OPTIONS,
+				method:
+					operation === OPERATION.ADD ? HTTP.METHOD.POST : HTTP.METHOD.DELETE,
+				...(operation === OPERATION.ADD
+					? {
+							headers: HTTP.JSON_HEADERS,
+							body: JSON.stringify(
+								type === LIST.TLDS
+									? { id: domain }
+									: { active: true, id: domain },
+							),
+						}
+					: {}),
+			};
+
+			for (let attempt = 0; attempt < CONFIG.retry.attempts; attempt++) {
+				try {
+					return await fetchOnce(url, options);
+				} catch (error) {
+					if (!isTransient(error)) throw error;
+					// The server may have applied a write before its response was lost.
+					let current;
+					try {
+						current = await this.getIds(type);
+					} catch (verificationError) {
+						throw new Error(lang.verificationFailed, {
+							cause: verificationError,
+						});
+					}
+					if (current.includes(domain) === (operation === OPERATION.ADD))
+						return;
+					if (attempt === CONFIG.retry.attempts - 1) throw error;
+					const wait = retryDelay(error, attempt);
+					this.onRetry?.(attempt + 2, CONFIG.retry.attempts, wait);
+					await delay(wait);
+				}
+			}
+		}
+	}
+
+	function element(tag, classNames = [], content) {
+		const node = document.createElement(tag);
+		node.classList.add(...classNames);
+		if (content !== undefined) node.textContent = content;
+		return node;
+	}
+
+	function createUi() {
+		const panel = element("section", ["card", "htn-panel"]);
+		const header = element("div", ["card-header"]);
+		header.appendChild(element("h6", ["mb-0", "text-center"], UI_TITLE));
+
+		const body = element("div", ["card-body"]);
+		const loader = element("div", ["htn-loader"]);
+		const stats = element("ul", ["htn-stats"]);
+		const progress = element("p", ["htn-progress"]);
+		progress.setAttribute("role", "status");
+		body.append(loader, stats, progress);
+
+		const footer = element("div", ["card-footer", "htn-footer"]);
+		const expand = element("button", ["btn", "htn-expand"]);
+		expand.type = "button";
+		expand.innerHTML = ARROWS.down;
+		expand.title = lang.expand;
+		expand.setAttribute("aria-label", lang.expand);
+		expand.setAttribute("aria-expanded", "false");
+		const controls = element("div", ["htn-controls"]);
+		controls.hidden = true;
+		const buttons = [];
+
+		for (const definition of ACTIONS) {
+			for (const operation of Object.values(OPERATION)) {
+				const button = element(
+					"button",
+					[
+						"btn",
+						"btn-sm",
+						operation === OPERATION.ADD ? "btn-primary" : "btn-danger",
+					],
+					lang[
+						operation === OPERATION.ADD
+							? definition.addLabel
+							: definition.removeLabel
+					],
+				);
+				button.type = "button";
+				button.addEventListener("click", () => {
+					runAction(definition, operation);
+				});
+				controls.appendChild(button);
+				buttons.push(button);
+			}
+		}
+
+		expand.addEventListener("click", () => {
+			controls.hidden = !controls.hidden;
+			const expanded = !controls.hidden;
+			expand.innerHTML = expanded ? ARROWS.up : ARROWS.down;
+			expand.title = expanded ? lang.collapse : lang.expand;
+			expand.setAttribute("aria-label", expand.title);
+			expand.setAttribute("aria-expanded", String(expanded));
 		});
-	};
+		footer.append(expand, controls);
+		panel.append(header, body, footer);
+		panel.hidden = true;
+		document.body.appendChild(panel);
 
-	const createUserInterface = () => {
-		const toggleButton = document.createElement("button");
-		const toggleButtonContainer = document.createElement("div");
-		const expandButton = document.createElement("button");
-		const card = document.createElement("div");
-		const cardHeader = document.createElement("div");
-		const cardBody = document.createElement("div");
-		const cardFooter = document.createElement("div");
-		const statList = document.createElement("ul");
-		const controlContainer = document.createElement("div");
-		const importHageziTldsButton = document.createElement("button");
-		const removeHageziTldsButton = document.createElement("button");
-		const importHageziTldsAggressiveButton = document.createElement("button");
-		const removeHageziTldsAggressiveButton = document.createElement("button");
-		const importHageziTldAllowlistButton = document.createElement("button");
-		const removeHageziTldAllowlistButton = document.createElement("button");
-		const importErrorTrackersButton = document.createElement("button");
-		const removeErrorTrackersButton = document.createElement("button");
-		const importCustomListButton = document.createElement("button");
-		const removeCustomListButton = document.createElement("button");
-		const progress = document.createElement("p");
-		const loader = document.createElement("div");
-
-		loader.classList.add("text-center");
-		loader.innerHTML = `<div class="loader" />`;
-
-		statList.classList.add("stat-list");
-
-		expandButton.classList.add("btn", "panel-expand-button");
-		expandButton.type = "button";
-		expandButton.innerHTML = arrowDownHtml;
-		expandButton.title = lang.expand;
-
-		controlContainer.classList.add("panel-control-container", "hidden");
-
-		importHageziTldsButton.classList.add("btn", "btn-primary", "btn-sm");
-		removeHageziTldsButton.classList.add("btn", "btn-danger", "btn-sm");
-		importHageziTldsAggressiveButton.classList.add(
-			"btn",
-			"btn-primary",
-			"btn-sm",
+		const navButton = element(
+			"button",
+			["btn", "btn-primary", "htn-toggle"],
+			lang.hidePanel,
 		);
-		removeHageziTldsAggressiveButton.classList.add(
-			"btn",
-			"btn-danger",
-			"btn-sm",
-		);
-		importHageziTldAllowlistButton.classList.add(
-			"btn",
-			"btn-primary",
-			"btn-sm",
-		);
-		removeHageziTldAllowlistButton.classList.add("btn", "btn-danger", "btn-sm");
-		importErrorTrackersButton.classList.add("btn", "btn-primary", "btn-sm");
-		removeErrorTrackersButton.classList.add("btn", "btn-danger", "btn-sm");
-		importCustomListButton.classList.add("btn", "btn-primary", "btn-sm");
-		removeCustomListButton.classList.add("btn", "btn-danger", "btn-sm");
-
-		importHageziTldsButton.type = "button";
-		removeHageziTldsButton.type = "button";
-		importHageziTldsAggressiveButton.type = "button";
-		removeHageziTldsAggressiveButton.type = "button";
-		importHageziTldAllowlistButton.type = "button";
-		removeHageziTldAllowlistButton.type = "button";
-		importErrorTrackersButton.type = "button";
-		removeErrorTrackersButton.type = "button";
-		importCustomListButton.type = "button";
-		removeCustomListButton.type = "button";
-
-		importHageziTldsButton.textContent = lang.importHageziTlds;
-		removeHageziTldsButton.textContent = lang.removeHageziTlds;
-		importHageziTldsAggressiveButton.textContent =
-			lang.importHageziTldsAggressive;
-		removeHageziTldsAggressiveButton.textContent =
-			lang.removeHageziTldsAggressive;
-		importHageziTldAllowlistButton.textContent = lang.importHageziTldAllowlist;
-		removeHageziTldAllowlistButton.textContent = lang.removeHageziTldAllowlist;
-		importErrorTrackersButton.textContent = lang.importErrorTrackers;
-		removeErrorTrackersButton.textContent = lang.removeErrorTrackers;
-		importCustomListButton.textContent = lang.importCustomList;
-		removeCustomListButton.textContent = lang.removeCustomList;
-
-		controlContainer.appendChild(importHageziTldsButton);
-		controlContainer.appendChild(removeHageziTldsButton);
-		controlContainer.appendChild(importHageziTldsAggressiveButton);
-		controlContainer.appendChild(removeHageziTldsAggressiveButton);
-		controlContainer.appendChild(importHageziTldAllowlistButton);
-		controlContainer.appendChild(removeHageziTldAllowlistButton);
-		controlContainer.appendChild(importErrorTrackersButton);
-		controlContainer.appendChild(removeErrorTrackersButton);
-		controlContainer.appendChild(importCustomListButton);
-		controlContainer.appendChild(removeCustomListButton);
-
-		progress.classList.add("panel-progress");
-
-		card.classList.add("card", "panel-container", "hidden");
-		card.style.opacity = "0";
-
-		cardHeader.classList.add("card-header");
-		cardHeader.innerHTML = `<h6 class="mb-0 text-center">HaGeZi to NextDNS</h6>`;
-
-		cardBody.classList.add("card-body");
-		cardBody.appendChild(loader);
-		cardBody.appendChild(statList);
-		cardBody.appendChild(progress);
-
-		cardFooter.classList.add("card-footer", "panel-footer");
-		cardFooter.appendChild(expandButton);
-		cardFooter.appendChild(controlContainer);
-
-		toggleButtonContainer.classList.add(
+		navButton.type = "button";
+		navButton.addEventListener("click", () => {
+			panelHiddenByUser = !panelHiddenByUser;
+			syncPanelVisibility();
+		});
+		const navContainer = element("div", [
 			"nav-item",
 			"d-flex",
 			"align-items-center",
-			"toggle-button-container",
-		);
+			"htn-toggle-container",
+		]);
+		navContainer.appendChild(navButton);
 
-		toggleButton.classList.add("btn", "btn-primary", "toggle-button");
-		toggleButton.textContent = toggleButton.classList.contains("hidden")
+		return { panel, navButton, navContainer, loader, stats, progress, buttons };
+	}
+
+	let activeProfile = null;
+	let panelHiddenByUser = false;
+	let busy = false;
+	let refreshing = false;
+	let statsRequestId = 0;
+	let downloadUrls = [];
+	const ui = createUi();
+
+	function syncPanelVisibility() {
+		ui.panel.hidden = !activeProfile || panelHiddenByUser;
+		ui.navButton.hidden = !activeProfile;
+		ui.navButton.textContent = panelHiddenByUser
 			? lang.showPanel
 			: lang.hidePanel;
-		toggleButton.type = "button";
+	}
 
-		toggleButton.addEventListener("click", () => {
-			const panelContainer = document.querySelector(".panel-container");
+	function syncButtons() {
+		for (const button of ui.buttons) button.disabled = busy || refreshing;
+	}
 
-			if (!panelContainer.classList.contains("hidden")) {
-				hidePanel();
-				return;
-			}
+	function showStats(profileId, values) {
+		const urls = [];
+		const rows = [
+			[lang.numberOfBlockedTlds, LIST.TLDS, values[LIST.TLDS]],
+			[lang.numberOfDeniedDomains, LIST.DENY, values[LIST.DENY]],
+			[lang.numberOfAllowedDomains, LIST.ALLOW, values[LIST.ALLOW]],
+		];
+		const fragment = document.createDocumentFragment();
 
-			showPanel();
-		});
-
-		card.appendChild(cardHeader);
-		card.appendChild(cardBody);
-		card.appendChild(cardFooter);
-		toggleButtonContainer.appendChild(toggleButton);
-		document.body.appendChild(card);
-
-		return {
-			card,
-			cardBody,
-			cardFooter,
-			loader,
-			progress,
-			statList,
-			expandButton,
-			controlContainer,
-			toggleButtonContainer,
-			importHageziTldsButton,
-			removeHageziTldsButton,
-			importHageziTldsAggressiveButton,
-			removeHageziTldsAggressiveButton,
-			importHageziTldAllowlistButton,
-			removeHageziTldAllowlistButton,
-			importErrorTrackersButton,
-			removeErrorTrackersButton,
-			importCustomListButton,
-			removeCustomListButton,
-		};
-	};
-
-	const {
-		cardBody,
-		loader,
-		progress,
-		statList,
-		expandButton,
-		controlContainer,
-		toggleButtonContainer,
-		importHageziTldsButton,
-		removeHageziTldsButton,
-		importHageziTldsAggressiveButton,
-		removeHageziTldsAggressiveButton,
-		importHageziTldAllowlistButton,
-		removeHageziTldAllowlistButton,
-		importErrorTrackersButton,
-		removeErrorTrackersButton,
-		importCustomListButton,
-		removeCustomListButton,
-	} = createUserInterface();
-
-	const addToggleButton = () => {
-		const observer = new MutationObserver(() => {
-			const nav = document.querySelector(".nav");
-
-			if (!nav || nav.querySelector(".toggle-button")) return;
-
-			nav.appendChild(toggleButtonContainer);
-		});
-
-		observer.observe(document.body, {
-			childList: true,
-			subtree: true,
-		});
-	};
-
-	const updateLoadingState = (loading) => {
-		if (loading) {
-			importHageziTldsButton.disabled = true;
-			removeHageziTldsButton.disabled = true;
-			importHageziTldsAggressiveButton.disabled = true;
-			removeHageziTldsAggressiveButton.disabled = true;
-			importHageziTldAllowlistButton.disabled = true;
-			removeHageziTldAllowlistButton.disabled = true;
-			importErrorTrackersButton.disabled = true;
-			removeErrorTrackersButton.disabled = true;
-			importCustomListButton.disabled = true;
-			removeCustomListButton.disabled = true;
-
-			return;
+		for (const [label, type, ids] of rows) {
+			const sorted = [...ids].sort();
+			const url = URL.createObjectURL(
+				new Blob([sorted.join("\n")], { type: EXPORT_MIME_TYPE }),
+			);
+			urls.push(url);
+			const item = element("li");
+			const link = element("a", [], String(ids.length));
+			link.href = url;
+			link.target = "_blank";
+			link.rel = "noopener noreferrer";
+			link.title = `${profileId}-${type}.txt`;
+			item.append(`${label}: `, link);
+			fragment.appendChild(item);
 		}
 
-		importHageziTldsButton.disabled = false;
-		removeHageziTldsButton.disabled = false;
-		importHageziTldsAggressiveButton.disabled = false;
-		removeHageziTldsAggressiveButton.disabled = false;
-		importHageziTldAllowlistButton.disabled = false;
-		removeHageziTldAllowlistButton.disabled = false;
-		importErrorTrackersButton.disabled = false;
-		removeErrorTrackersButton.disabled = false;
-		importCustomListButton.disabled = false;
-		removeCustomListButton.disabled = false;
-	};
+		ui.stats.replaceChildren(fragment);
+		for (const oldUrl of downloadUrls) URL.revokeObjectURL(oldUrl);
+		downloadUrls = urls;
+	}
 
-	const refreshStats = async () => {
-		const profileId = Helper.getProfileId();
-		const nextApi = new NextApi(profileId);
+	async function refreshStats(profileId) {
+		if (profileId !== activeProfile) return;
+		const requestId = ++statsRequestId;
+		refreshing = true;
+		ui.loader.hidden = false;
+		syncButtons();
 
-		updateLoadingState(true);
-
-		const [tlds, denylist, allowlist] = await Promise.all([
-			nextApi
-				.getSecurity()
-				.then((res) =>
-					res.data.tlds.map(({ id }) =>
-						id.startsWith("xn--") ? punycode.toUnicode(id) : id,
-					),
+		try {
+			const api = new NextDnsApi(profileId);
+			const [tlds, denylist, allowlist] = await Promise.all([
+				api.getIds(LIST.TLDS),
+				api.getIds(LIST.DENY),
+				api.getIds(LIST.ALLOW),
+			]);
+			if (requestId !== statsRequestId || profileId !== activeProfile) return;
+			showStats(profileId, {
+				[LIST.TLDS]: tlds.map((id) =>
+					id.startsWith(PUNYCODE_PREFIX) && punycode
+						? punycode.toUnicode(id)
+						: id,
 				),
-			nextApi.getDenylist().then((res) => res.data.map(({ id }) => id)),
-			nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id)),
-		]);
-		const tldContent = new Blob([tlds.toSorted().join("\n")], {
-			type: "text/plain;charset=utf-8",
-		});
-		const denylistContent = new Blob([denylist.toSorted().join("\n")], {
-			type: "text/plain",
-		});
-		const allowlistContent = new Blob([allowlist.toSorted().join("\n")], {
-			type: "text/plain",
-		});
-
-		updateLoadingState(false);
-
-		statList.innerHTML = `
-    <li>${lang.numberOfBlockedTlds}: <a href="${URL.createObjectURL(tldContent)}" target="_blank">${tlds.length}</a></li>
-    <li>${lang.numberOfDeniedDomains}: <a href="${URL.createObjectURL(denylistContent)}" target="_blank">${denylist.length}</a></li>
-    <li>${lang.numberOfAllowedDomains}: <a href="${URL.createObjectURL(allowlistContent)}" target="_blank">${allowlist.length}</a></li>
-    `;
-	};
-
-	const attachButtonEvents = () => {
-		expandButton.addEventListener("click", (event) => {
-			const target = event.currentTarget;
-
-			if (controlContainer.classList.contains("hidden")) {
-				controlContainer.classList.remove("hidden");
-				target.title = lang.collapse;
-				target.innerHTML = arrowUpHtml;
-				return;
+				[LIST.DENY]: denylist,
+				[LIST.ALLOW]: allowlist,
+			});
+		} finally {
+			if (requestId === statsRequestId) {
+				refreshing = false;
+				ui.loader.hidden = true;
+				syncButtons();
 			}
-
-			controlContainer.classList.add("hidden");
-			target.title = lang.expand;
-			target.innerHTML = arrowDownHtml;
-		});
-
-		importHageziTldsButton.addEventListener("click", async () => {
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentTlds, hageziTlds] = await Promise.all([
-					nextApi
-						.getSecurity()
-						.then((res) => res.data.tlds.map(({ id }) => id)),
-					Helper.getAbusedTlds(),
-				]);
-				const tldsToImport = hageziTlds.difference(new Set(currentTlds));
-				let index = 1;
-
-				for (const domain of tldsToImport) {
-					progress.textContent = `${lang.adding} ${domain} (${index}/${tldsToImport.size})`;
-					await nextApi.addTld(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		removeHageziTldsButton.addEventListener("click", async () => {
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentTlds, hageziTlds] = await Promise.all([
-					nextApi
-						.getSecurity()
-						.then((res) => res.data.tlds.map(({ id }) => id)),
-					Helper.getAbusedTlds(),
-				]);
-				const tldsToRemove = hageziTlds.intersection(new Set(currentTlds));
-				let index = 1;
-
-				for (const domain of tldsToRemove) {
-					progress.textContent = `${lang.removing} ${domain} (${index}/${tldsToRemove.size})`;
-					await nextApi.removeTld(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		importHageziTldsAggressiveButton.addEventListener("click", async () => {
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentTlds, hageziTlds] = await Promise.all([
-					nextApi
-						.getSecurity()
-						.then((res) => res.data.tlds.map(({ id }) => id)),
-					Helper.getAbusedTldsAggressive(),
-				]);
-				const tldsToImport = hageziTlds.difference(new Set(currentTlds));
-				let index = 1;
-
-				for (const domain of tldsToImport) {
-					progress.textContent = `${lang.adding} ${domain} (${index}/${tldsToImport.size})`;
-					await nextApi.addTld(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		removeHageziTldsAggressiveButton.addEventListener("click", async () => {
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentTlds, hageziTlds] = await Promise.all([
-					nextApi
-						.getSecurity()
-						.then((res) => res.data.tlds.map(({ id }) => id)),
-					Helper.getAbusedTldsAggressive(),
-				]);
-				const tldsToRemove = hageziTlds.intersection(new Set(currentTlds));
-				let index = 1;
-
-				for (const domain of tldsToRemove) {
-					progress.textContent = `${lang.removing} ${domain} (${index}/${tldsToRemove.size})`;
-					await nextApi.removeTld(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		importHageziTldAllowlistButton.addEventListener("click", async () => {
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentAllowlist, hageziTldAllowlist] = await Promise.all([
-					nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id)),
-					Helper.getTldAllowlist(),
-				]);
-				const domainsToImport = hageziTldAllowlist.difference(
-					new Set(currentAllowlist),
-				);
-				let index = 1;
-
-				for (const domain of domainsToImport) {
-					progress.textContent = `${lang.adding} ${domain} (${index}/${domainsToImport.size})`;
-					await nextApi.allowlistDomain(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		removeHageziTldAllowlistButton.addEventListener("click", async () => {
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentAllowlist, hageziTldAllowlist] = await Promise.all([
-					nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id)),
-					Helper.getTldAllowlist(),
-				]);
-				const domainsToRemove = hageziTldAllowlist.intersection(
-					new Set(currentAllowlist),
-				);
-				let index = 1;
-
-				for (const domain of domainsToRemove) {
-					progress.textContent = `${lang.removing} ${domain} (${index}/${domainsToRemove.size})`;
-					await nextApi.removeAllowedDomain(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		importErrorTrackersButton.addEventListener("click", async () => {
-			const listType = Helper.promptListType();
-
-			if (!listType) return;
-
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentList, errorTrackerList] = await Promise.all([
-					listType === ListType.Allowlist
-						? nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id))
-						: nextApi.getDenylist().then((res) => res.data.map(({ id }) => id)),
-					Helper.getErrorTrackerList(),
-				]);
-				const domainsToImport = errorTrackerList.difference(
-					new Set(currentList),
-				);
-				const processDomain =
-					listType === ListType.Allowlist
-						? nextApi.allowlistDomain.bind(nextApi)
-						: nextApi.denylistDomain.bind(nextApi);
-				let index = 1;
-
-				for (const domain of domainsToImport) {
-					progress.textContent = `${lang.adding} ${domain} (${index}/${domainsToImport.size})`;
-					await processDomain(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		removeErrorTrackersButton.addEventListener("click", async () => {
-			const listType = Helper.promptListType();
-
-			if (!listType) return;
-
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentList, errorTrackerList] = await Promise.all([
-					listType === ListType.Allowlist
-						? nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id))
-						: nextApi.getDenylist().then((res) => res.data.map(({ id }) => id)),
-					Helper.getErrorTrackerList(),
-				]);
-				const domainsToRemove = errorTrackerList.intersection(
-					new Set(currentList),
-				);
-				const processDomain =
-					listType === ListType.Allowlist
-						? nextApi.removeAllowedDomain.bind(nextApi)
-						: nextApi.removeDeniedDomain.bind(nextApi);
-				let index = 1;
-
-				for (const domain of domainsToRemove) {
-					progress.textContent = `${lang.removing} ${domain} (${index}/${domainsToRemove.size})`;
-					await processDomain(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		importCustomListButton.addEventListener("click", async () => {
-			const url = Helper.promptUrl();
-
-			if (!url) return;
-
-			const listType = Helper.promptListType();
-
-			if (!listType) return;
-
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentList, importingList] = await Promise.all([
-					listType === ListType.Allowlist
-						? nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id))
-						: nextApi.getDenylist().then((res) => res.data.map(({ id }) => id)),
-					Helper.getWildcardList(url),
-				]);
-				const domainsToImport = importingList.difference(new Set(currentList));
-				const processDomain =
-					listType === ListType.Allowlist
-						? nextApi.allowlistDomain.bind(nextApi)
-						: nextApi.denylistDomain.bind(nextApi);
-				let index = 1;
-
-				for (const domain of domainsToImport) {
-					progress.textContent = `${lang.adding} ${domain} (${index}/${domainsToImport.size})`;
-					await processDomain(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-
-		removeCustomListButton.addEventListener("click", async () => {
-			const url = Helper.promptUrl();
-
-			if (!url) return;
-
-			const listType = Helper.promptListType();
-
-			if (!listType) return;
-
-			if (!Helper.confirmProceed()) return;
-
-			updateLoadingState(true);
-
-			const profileId = Helper.getProfileId();
-			const nextApi = new NextApi(profileId);
-
-			try {
-				const [currentList, removingList] = await Promise.all([
-					listType === ListType.Allowlist
-						? nextApi.getAllowlist().then((res) => res.data.map(({ id }) => id))
-						: nextApi.getDenylist().then((res) => res.data.map(({ id }) => id)),
-					Helper.getWildcardList(url),
-				]);
-				const domainsToImport = removingList.intersection(new Set(currentList));
-				const processDomain =
-					listType === ListType.Allowlist
-						? nextApi.removeAllowedDomain.bind(nextApi)
-						: nextApi.removeDeniedDomain.bind(nextApi);
-				let index = 1;
-
-				for (const domain of domainsToImport) {
-					progress.textContent = `${lang.removing} ${domain} (${index}/${domainsToImport.size})`;
-					await processDomain(domain);
-					await Utility.sleep();
-					index++;
-				}
-			} catch (error) {
-				progress.textContent = error.message;
-				return;
-			}
-
-			await refreshStats();
-			progress.textContent = lang.done;
-			updateLoadingState(false);
-		});
-	};
-
-	addToggleButton();
-	attachButtonEvents();
-
-	let isInit = false;
-	const init = async () => {
-		if (!Helper.profileIdExists()) {
-			hidePanel();
-			return;
 		}
-		showPanel();
-		addToggleButton();
+	}
 
-		if (isInit) return;
+	async function runAction(definition, operation) {
+		if (busy || refreshing || !activeProfile) return;
+		const profileId = activeProfile;
+		const url = definition.customUrl ? promptUrl() : null;
+		if (definition.customUrl && !url) return;
+		const list = definition.selectList ? promptListType() : definition.list;
+		if (!list || !window.confirm(lang.areYouSureYouWantToProceed)) return;
 
-		statList.innerHTML = "";
-		cardBody.prepend(loader);
-		await refreshStats();
-		loader.remove();
-		isInit = true;
-	};
+		busy = true;
+		syncButtons();
+		const onRetry = (attempt, total, wait) => {
+			if (activeProfile === profileId) {
+				ui.progress.textContent = `${lang.retrying} (${attempt}/${total}, ${Math.ceil(wait / HTTP.MILLISECONDS_PER_SECOND)}s)`;
+			}
+		};
+		const api = new NextDnsApi(profileId, onRetry);
+		try {
+			const source = definition.customUrl
+				? { url, format: FORMAT.WILDCARD }
+				: SOURCE_DEFINITIONS[definition.source];
+			const [currentIds, sourceIds] = await Promise.all([
+				api.getIds(list),
+				fetchSource(source, onRetry),
+			]);
+			if (sourceIds.size === 0) throw new Error(lang.emptyList);
+			const existing = new Set(currentIds);
+			const targets = [...sourceIds].filter((id) =>
+				operation === OPERATION.ADD ? !existing.has(id) : existing.has(id),
+			);
+			for (const [index, domain] of targets.entries()) {
+				if (activeProfile !== profileId) throw new Error(lang.profileChanged);
+				ui.progress.textContent = `${operation === OPERATION.ADD ? lang.adding : lang.removing} ${domain} (${index + 1}/${targets.length})`;
+				await api.change(list, operation, domain);
+				await delay(CONFIG.requestDelayMs);
+			}
+			if (activeProfile === profileId) {
+				await refreshStats(profileId);
+				ui.progress.textContent = lang.done;
+			}
+		} catch (error) {
+			if (activeProfile === profileId) {
+				ui.progress.textContent =
+					error instanceof Error ? error.message : String(error);
+				// An interrupted import may have changed some entries already.
+				try {
+					await refreshStats(profileId);
+				} catch (refreshError) {
+					console.warn(`${UI_TITLE}: statistics refresh failed`, refreshError);
+				}
+			}
+		} finally {
+			busy = false;
+			syncButtons();
+		}
+	}
 
-	window.navigation?.addEventListener("navigatesuccess", init);
-	init();
+	function syncRoute() {
+		const profileId = getProfileId();
+		if (profileId === activeProfile) return;
+		activeProfile = profileId;
+		statsRequestId += 1;
+		refreshing = false;
+		ui.stats.replaceChildren();
+		for (const url of downloadUrls) URL.revokeObjectURL(url);
+		downloadUrls = [];
+		ui.progress.textContent = "";
+		ui.loader.hidden = !profileId;
+		syncPanelVisibility();
+		syncButtons();
+		if (profileId) {
+			refreshStats(profileId).catch((error) => {
+				if (activeProfile === profileId)
+					ui.progress.textContent = error.message;
+			});
+		}
+	}
+
+	function mountNavButton() {
+		const nav = document.querySelector(".nav");
+		if (nav && ui.navContainer.parentNode !== nav)
+			nav.appendChild(ui.navContainer);
+	}
+
+	// NextDNS replaces its navigation during SPA route changes.
+	const observer = new MutationObserver(() => {
+		mountNavButton();
+		if (getProfileId() !== activeProfile) syncRoute();
+	});
+	observer.observe(document.body, { childList: true, subtree: true });
+	window.navigation?.addEventListener("navigatesuccess", syncRoute);
+	window.addEventListener("popstate", syncRoute);
+	window.addEventListener("hashchange", syncRoute);
+	window.addEventListener("pagehide", () => {
+		for (const url of downloadUrls) URL.revokeObjectURL(url);
+		downloadUrls = [];
+	});
+	mountNavButton();
+	syncRoute();
 
 	GM_addStyle(`
-    .panel-container {
-      position: fixed;
-      right: 1rem;
-      bottom: 1rem;
-    }
-
-    .toggle-button-container {
-      justify-content: end;
-      flex: 1;
-    }
-
-    .toggle-button {
-      white-space: nowrap;
-    }
-
-    .stat-list {
-      list-style: initial;
-    }
-
-    .panel-progress {
-      margin: 0;
-    }
-
-    .panel-footer {
-      display: flex;
-      flex-direction: column;
-      row-gap: .5rem;
-    }
-
-    .panel-control-container {
-      display: flex;
-      flex-direction: column;
-      row-gap: .5rem;
-    }
-
-    .panel-control-container > .btn {
-      width: fit-content;
-    }
-
-    .panel-footer > .panel-expand-button {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: auto;
-      padding: 0;
-    }
-
-    .hidden {
-      display: none;
-    }
-
-    .loader {
-      width: 1.5rem;
-      height: 1.5rem;
-      border: 2px solid #000;
-      border-bottom-color: transparent;
-      border-radius: 50%;
-      display: inline-block;
-      box-sizing: border-box;
-      animation: rotation 1s linear infinite;
-    }
-
-    @keyframes rotation {
-      0% {
-        transform: rotate(0deg);
-      }
-
-      100% {
-        transform: rotate(360deg);
-      }
-    }
+    .htn-panel { position: fixed; right: 1rem; bottom: 1rem; z-index: 1000; }
+    .htn-panel[hidden], .htn-controls[hidden], .htn-toggle[hidden], .htn-loader[hidden] { display: none !important; }
+    .htn-toggle-container { justify-content: end; flex: 1; }
+    .htn-toggle { white-space: nowrap; }
+    .htn-stats { list-style: initial; }
+    .htn-progress { margin: 0; }
+    .htn-footer, .htn-controls { display: flex; flex-direction: column; row-gap: .5rem; }
+    .htn-controls > .btn { width: fit-content; }
+    .htn-expand { display: flex; align-items: center; justify-content: center; width: auto; padding: 0; }
+    .htn-loader { display: block; margin: 0 auto; width: 1.5rem; height: 1.5rem; border: 2px solid #000; border-bottom-color: transparent; border-radius: 50%; box-sizing: border-box; animation: htn-rotation 1s linear infinite; }
+    @keyframes htn-rotation { to { transform: rotate(360deg); } }
   `);
-})(window);
+})();
