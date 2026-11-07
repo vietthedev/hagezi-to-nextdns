@@ -1,3 +1,4 @@
+analytics.rollbar.com
 api.rollbar.com
 bugfender.com
 bugsnag.com
@@ -20,9 +21,11 @@ firebaselogging-pa.googleapis.com
 firebaselogging.googleapis.com
 heartbeat.exceptionless.io
 in.appcenter.ms
+ingest.appcenter.ms
 instabug.com
 notifier-configs.airbrake.io
 ph.trackjs.com
+ping.rollbar.com
 raygun.io
 sentry-cdn.com
 sentry.io
